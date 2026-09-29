@@ -68,6 +68,7 @@ with native tests; `src/lib.rs` is the glue to the host. See Chimaera's
 ## Release
 
 Bump `version` in both `Cargo.toml` and `plugin.toml`, commit, and push a tag
-`vX.Y.Z`. The release workflow publishes `plugin.wasm`, `plugin.toml` and
+`vX.Y.Z` (or run the release workflow by hand on `main`, which tags that version
+itself). The release workflow publishes `plugin.wasm`, `plugin.toml` and
 `SHA256SUMS`. A new TinyTeX month is a new plugin release: update the
 `[[tools.artifacts]]` (URL, size, and the sha256 taken from each file).
