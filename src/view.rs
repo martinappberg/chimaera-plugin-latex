@@ -33,6 +33,9 @@ pub struct Doc<'a> {
     pub has_log: bool,
     /// No latexmk anywhere: the install offer.
     pub no_engine: bool,
+    /// The TinyTeX download for this host, in bytes (the host knows which
+    /// artifact is this platform's).
+    pub download: Option<u64>,
     /// `{tone, title, text, offer?, log?}`: something the user should act on.
     pub notice: Option<&'a Value>,
     /// The document's build folder (`output:<key>/`).
@@ -171,8 +174,19 @@ fn no_tex_text() -> &'static str {
     "Chimaera looked on the PATH your terminals get, including your environment prelude. On a cluster, load yours in Environment settings (often: module load texlive) and build again, or install TinyTeX, a current TeX Live, into this plugin's own folder. Nothing else on the system changes."
 }
 
-fn install_button() -> Value {
-    json!({"type": "button", "label": "Install TeX Live (TinyTeX, 152 MB)", "action": "install-tool",
+/// "Install TeX Live (TinyTeX, 267 MB)": this host's download, in MB.
+fn install_label(download: Option<u64>) -> String {
+    match download {
+        Some(bytes) => format!(
+            "Install TeX Live (TinyTeX, {} MB)",
+            (bytes + 500_000) / 1_000_000
+        ),
+        None => "Install TeX Live (TinyTeX)".to_string(),
+    }
+}
+
+fn install_button(d: &Doc) -> Value {
+    json!({"type": "button", "label": install_label(d.download), "action": "install-tool",
            "payload": {"tool": "tinytex"}, "icon": "download", "tone": "accent"})
 }
 
@@ -180,7 +194,7 @@ fn notice(d: &Doc) -> Option<Value> {
     if d.no_engine && d.has_pdf && d.busy.is_none() {
         return Some(
             json!({"type": "callout", "tone": "warn", "title": "No TeX Live on this host",
-            "text": no_tex_text(), "actions": [install_button()]}),
+            "text": no_tex_text(), "actions": [install_button(d)]}),
         );
     }
     let n = d.notice?;
@@ -223,7 +237,7 @@ fn problems(d: &Doc) -> Value {
 fn result(d: &Doc) -> Value {
     if d.no_engine && !d.has_pdf && d.busy.is_none() {
         return json!({"type": "empty", "title": "No TeX Live on this host", "text": no_tex_text(),
-            "action": {"label": "Install TeX Live (TinyTeX, 152 MB)", "action": "install-tool", "payload": {"tool": "tinytex"}}});
+            "action": {"label": install_label(d.download), "action": "install-tool", "payload": {"tool": "tinytex"}}});
     }
     if d.has_pdf {
         return json!({"type": "stack", "gap": "small", "children": [{"type": "pdf", "src": d.pdf}, problems(d)]});
@@ -285,12 +299,26 @@ mod tests {
             has_pdf: false,
             has_log: false,
             no_engine: false,
+            download: Some(267_235_208),
             notice: None,
             key: "k-main".into(),
             stem: "main",
             pdf: "output:k-main/main.pdf".into(),
             beside: "main.pdf".into(),
         }
+    }
+
+    #[test]
+    fn the_install_offer_names_this_hosts_download() {
+        assert_eq!(
+            install_label(Some(267_235_208)),
+            "Install TeX Live (TinyTeX, 267 MB)"
+        );
+        assert_eq!(
+            install_label(Some(151_702_028)),
+            "Install TeX Live (TinyTeX, 152 MB)"
+        );
+        assert_eq!(install_label(None), "Install TeX Live (TinyTeX)");
     }
 
     fn find<'v>(v: &'v Value, kind: &str, out: &mut Vec<&'v Value>) {

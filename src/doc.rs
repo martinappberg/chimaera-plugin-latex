@@ -107,6 +107,12 @@ pub fn engine_flag(engine: &str) -> &'static str {
     }
 }
 
+/// Whether the next build must make latexmk run again although no source
+/// changed: the last one ended in errors or stopped.
+pub fn rerun_forced(last_state: Option<&str>) -> bool {
+    matches!(last_state, Some("errors" | "failed"))
+}
+
 /// Whether a file's head starts a document (a main file).
 pub fn is_document(head: &str) -> bool {
     head.lines().any(|l| {
@@ -316,6 +322,14 @@ mod tests {
         assert_eq!(missing_words("tikz-cd.sty"), "the tikz-cd package");
         assert_eq!(missing_words("elsarticle.cls"), "the elsarticle class");
         assert_eq!(missing_words("fig.png"), "fig.png");
+    }
+
+    #[test]
+    fn a_build_after_a_failure_is_forced() {
+        assert!(rerun_forced(Some("errors")));
+        assert!(rerun_forced(Some("failed")));
+        assert!(!rerun_forced(Some("ok")));
+        assert!(!rerun_forced(None));
     }
 
     #[test]
