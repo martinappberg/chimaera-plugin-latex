@@ -17,7 +17,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 [[package]]
 name = "chimaera-plugin-api"
 version = "0.2.0"
-source = "git+https://github.com/martinappberg/chimaera.git?rev=4c003ec1d211df1dcf9fc23ae4af28c5d6b84ab0#4c003ec1d211df1dcf9fc23ae4af28c5d6b84ab0"
+source = "git+https://github.com/martinappberg/chimaera.git?rev=1efe086f9131b82acef936d0f713aeed2fa92bf5#1efe086f9131b82acef936d0f713aeed2fa92bf5"
 dependencies = [
  "serde",
  "serde_json",

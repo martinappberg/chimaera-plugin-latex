@@ -19,11 +19,12 @@ use std::collections::BTreeMap;
 
 use chimaera_plugin_api::serde_json::{json, Map, Value};
 use chimaera_plugin_api::{
-    host, platform, ui, Context, Event, JobEnd, Level, Plugin, ToolDef, ToolResult,
+    host, platform, Context, Event, JobEnd, Level, Plugin, ToolDef, ToolResult,
 };
 
 pub mod doc;
 pub mod log;
+pub mod view;
 
 struct Latex;
 
@@ -190,6 +191,7 @@ fn build(cx: &Context, main: &str, by: &str) -> Result<String, String> {
                 o.insert("by".into(), json!(by));
                 o.insert("engine".into(), json!(engine));
                 o.remove("missing");
+                o.remove("notice");
             }
             save_builds(cx, all);
             remember_job(cx, &job, json!({"main": main, "kind": "build"}));
@@ -264,6 +266,25 @@ fn read_build(cx: &Context, main: &str, job: &str) -> Found {
             });
         }
     }
+    // A missing package: said as one, on the line that asks for it (TeX
+    // points at the line after, where it stopped).
+    for d in parsed.diags.iter_mut() {
+        let Some(missing) = parsed
+            .missing
+            .iter()
+            .find(|m| d.message.contains(m.as_str()))
+        else {
+            continue;
+        };
+        if let Some(n) = doc::missing_line(&head(cx, &d.file), missing) {
+            d.line = n;
+            d.context = None;
+        }
+        d.message = format!(
+            "{} isn't installed ({missing} not found)",
+            upper_first(&doc::missing_words(missing))
+        );
+    }
     if !ran {
         // latexmk or Perl complaining before TeX ran.
         let said = format!(
@@ -278,6 +299,12 @@ fn read_build(cx: &Context, main: &str, job: &str) -> Found {
         }
     }
     Found { parsed, ran }
+}
+
+fn upper_first(text: &str) -> String {
+    let mut c = text.chars();
+    c.next()
+        .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
 }
 
 fn diag_json(d: &log::Diag) -> Value {
@@ -353,30 +380,24 @@ fn finish_build(cx: &Context, end: &JobEnd, main: &str) {
         .to_string();
     let errors = parsed.count("error");
     let warnings = parsed.count("warning");
-    let (state, mut label) = if end.timed_out {
-        (
-            "failed",
-            "took longer than its time limit and was stopped".to_string(),
-        )
+    let state = if end.timed_out || (end.exit != Some(0) && errors == 0) {
+        "failed"
     } else if end.exit == Some(0) {
-        (
-            "ok",
-            doc::result_words(0, warnings, parsed.pages, end.duration_ms),
-        )
-    } else if errors > 0 {
-        (
-            "errors",
-            doc::result_words(errors, warnings, None, end.duration_ms),
-        )
+        "ok"
     } else {
-        (
-            "failed",
-            parsed
-                .general
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "latexmk stopped without saying why".into()),
-        )
+        "errors"
+    };
+    // What the user should act on, beside the problems list.
+    let mut notice: Option<Value> = if end.timed_out {
+        Some(json!({"tone": "bad", "title": "The build was stopped",
+            "text": format!("It ran longer than its {} s limit: an endless loop, or a very large document (the limit is a setting).", wall(cx)),
+            "log": true}))
+    } else if state == "failed" {
+        Some(json!({"tone": "bad", "title": "The build stopped",
+            "text": parsed.general.first().cloned().unwrap_or_else(|| "latexmk stopped without saying why; the log has the details.".into()),
+            "log": true}))
+    } else {
+        None
     };
     record_inputs(cx, main);
     let mut all = get(cx, "builds");
@@ -395,12 +416,18 @@ fn finish_build(cx: &Context, end: &JobEnd, main: &str) {
         .unwrap_or_default();
     let next_missing = parsed.missing.iter().find(|m| !tried.contains(m)).cloned();
     let mut lookup: Option<String> = None;
-    if let Some(file) = &next_missing {
+    if let Some(file) = parsed.missing.first() {
         if from == "tool:tinytex" && setting_bool(cx, "install_missing_packages", true) {
-            lookup = Some(file.clone());
+            lookup = next_missing;
         } else if from == "path" {
-            label = format!(
-                "{label} · {file} is missing from this host's TeX Live: ask its admins, load a fuller one in Environment settings, or turn on Use the plugin's TeX Live"
+            notice = Some(
+                json!({"tone": "warn", "title": format!("{} isn't in this host's TeX Live", upper_first(&doc::missing_words(file))),
+                "text": "Ask its admins for the package, load a fuller TeX Live in Environment settings, or turn on Use the plugin's TeX Live in this plugin's settings."}),
+            );
+        } else {
+            notice = Some(
+                json!({"tone": "warn", "title": format!("{} is missing", upper_first(&doc::missing_words(file))),
+                "text": "Installing missing packages is off in this plugin's settings."}),
             );
         }
     }
@@ -408,13 +435,24 @@ fn finish_build(cx: &Context, end: &JobEnd, main: &str) {
         o.remove("job");
         o.insert("pending".into(), json!(false));
         o.insert("state".into(), json!(state));
-        o.insert("label".into(), json!(label));
+        o.insert("errors".into(), json!(errors));
+        o.insert("warnings".into(), json!(warnings));
+        o.insert("pages".into(), json!(parsed.pages));
+        o.insert("ms".into(), json!(end.duration_ms));
         o.insert("ran".into(), json!(found.ran));
         o.insert("from".into(), json!(from));
         o.insert("last_job".into(), json!(end.id));
-        o.remove("offer");
+        match &notice {
+            Some(n) => o.insert("notice".into(), n.clone()),
+            None => o.remove("notice"),
+        };
     }
     save_builds(cx, all);
+    let label = match state {
+        "ok" => doc::result_words(0, warnings, parsed.pages, end.duration_ms),
+        "errors" => doc::result_words(errors, warnings, None, end.duration_ms),
+        _ => "the build stopped".to_string(),
+    };
     let _ = platform::publish(
         cx,
         "output/1",
@@ -441,7 +479,7 @@ fn set_status(cx: &Context, main: &str, update: impl FnOnce(&mut Obj)) {
 }
 
 /// Which package holds `file`: `tlmgr search --global --file` on the
-/// plugin's TinyTeX (it reads the package list from a CTAN mirror).
+/// plugin's TinyTeX (it reads the package list from its mirror).
 fn look_up(cx: &Context, main: &str, file: &str, by: &str) {
     let f = file.to_string();
     set_status(cx, main, |o| {
@@ -452,11 +490,11 @@ fn look_up(cx: &Context, main: &str, file: &str, by: &str) {
             .unwrap_or_default();
         tried.push(json!(f));
         o.insert("tried".into(), json!(tried));
-        o.insert("installing".into(), json!(f));
         o.insert(
-            "label".into(),
-            json!(format!("{f} is missing: looking for its package…")),
+            "busy".into(),
+            json!(format!("Looking up {}…", doc::missing_words(&f))),
         );
+        o.remove("notice");
     });
     let spec = json!({"program": "tlmgr", "args": ["search", "--global", "--file", format!("/{file}")],
                       "prefer": "tool:tinytex", "label": format!("Looking up {file}"), "priority": by, "wall_s": 120});
@@ -467,10 +505,10 @@ fn look_up(cx: &Context, main: &str, file: &str, by: &str) {
             json!({"main": main, "kind": "search", "file": file}),
         ),
         Err(err) => set_status(cx, main, |o| {
-            o.remove("installing");
+            o.remove("busy");
             o.insert(
-                "label".into(),
-                json!(format!("{file} is missing; looking it up failed: {err}")),
+                "notice".into(),
+                json!({"tone": "warn", "title": format!("{} is missing", upper_first(&doc::missing_words(file))), "text": format!("Looking it up failed: {err}")}),
             );
         }),
     }
@@ -503,9 +541,8 @@ fn install_package(
     );
     let p = package.to_string();
     set_status(cx, main, |o| {
-        o.insert("installing".into(), json!(p));
-        o.insert("label".into(), json!(format!("installing {p}…")));
-        o.remove("offer");
+        o.insert("busy".into(), json!(format!("Installing {p}…")));
+        o.remove("notice");
     });
     Ok(())
 }
@@ -520,8 +557,11 @@ fn finish_search(cx: &Context, end: &JobEnd, main: &str, file: &str) {
         Some(package) => {
             if let Err(err) = install_package(cx, main, &package, true, &by) {
                 set_status(cx, main, |o| {
-                    o.remove("installing");
-                    o.insert("label".into(), json!(err));
+                    o.remove("busy");
+                    o.insert(
+                        "notice".into(),
+                        json!({"tone": "warn", "title": format!("Couldn't install {package}"), "text": err}),
+                    );
                 });
             }
         }
@@ -529,14 +569,15 @@ fn finish_search(cx: &Context, end: &JobEnd, main: &str, file: &str) {
             let why = doc::tlmgr_words(&job_text(cx, &end.id, "stderr"));
             let f = file.to_string();
             set_status(cx, main, |o| {
-                o.remove("installing");
+                o.remove("busy");
+                let text = if end.exit == Some(0) {
+                    "No TeX Live package has it: check its name in the source.".to_string()
+                } else {
+                    format!("Looking it up failed: {why}.")
+                };
                 o.insert(
-                    "label".into(),
-                    json!(if why.is_empty() {
-                        format!("{f} is missing and no TeX Live package has it")
-                    } else {
-                        format!("{f} is missing; looking up its package failed: {why}")
-                    }),
+                    "notice".into(),
+                    json!({"tone": "warn", "title": format!("{} is missing", upper_first(&doc::missing_words(&f))), "text": text}),
                 );
             });
         }
@@ -551,27 +592,25 @@ fn finish_install(cx: &Context, end: &JobEnd, main: &str, package: &str, verifie
     let p = package.to_string();
     if end.exit == Some(0) {
         set_status(cx, main, |o| {
-            o.remove("installing");
-            o.insert(
-                "label".into(),
-                json!(format!("installed {p}; building again…")),
-            );
+            o.remove("busy");
+            o.remove("notice");
         });
         let _ = build(cx, main, &by);
         return;
     }
     let why = doc::tlmgr_words(&job_text(cx, &end.id, "stderr"));
     set_status(cx, main, |o| {
-        o.remove("installing");
+        o.remove("busy");
         // Without gpg the signature can't be checked: the user may still
         // install on a click, trusting the mirror's checksums alone.
+        let mut n = json!({"tone": "warn", "title": format!("Couldn't install {p}"), "text": format!("{why}.")});
         if verified {
-            o.insert("offer".into(), json!(p));
+            n["offer"] = json!(p);
+            n["text"] = json!(format!(
+                "{why}. TeX Live's signature couldn't be checked here (it needs gpg)."
+            ));
         }
-        o.insert(
-            "label".into(),
-            json!(format!("couldn't install {p}: {why}")),
-        );
+        o.insert("notice".into(), n);
     });
 }
 
@@ -604,15 +643,6 @@ fn open_now(cx: &Context, main: &str) -> bool {
         .is_some_and(|t| host::now_ms().saturating_sub(t) < OPEN_MS)
 }
 
-fn tone(state: &str) -> &'static str {
-    match state {
-        "ok" => "good",
-        "errors" | "failed" => "bad",
-        "building" => "accent",
-        _ => "neutral",
-    }
-}
-
 fn document(cx: &Context, file: &str, narrow: bool) -> Value {
     let main = main_for(cx, file);
     let now = host::now_ms();
@@ -624,68 +654,58 @@ fn document(cx: &Context, file: &str, narrow: bool) -> Value {
         entry["touched"] = json!(now);
     }
     save_builds(cx, all);
-    if first_time && setting_bool(cx, "build_on_open", true) && !has_pdf(cx, &main) {
+    let pdf = has_pdf(cx, &main);
+    let tinytex = platform::tool_state(cx, "tinytex");
+    let installing = tinytex["installing"].as_bool() == Some(true);
+    let missing = get(cx, "builds")
+        .get(&main)
+        .is_some_and(|b| b["missing"].is_string());
+    if first_time && setting_bool(cx, "build_on_open", true) && !pdf {
+        let _ = build(cx, &main, "user");
+    } else if missing && !installing && !tinytex["installed"].is_null() {
+        // TeX Live arrived (the Install button): build what waited for it.
         let _ = build(cx, &main, "user");
     }
     let b = get(cx, "builds")
         .get(&main)
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let building = b["job"].is_string();
-    let busy = building || b["installing"].is_string();
-    let state = if busy {
-        "building"
+    let busy = if b["job"].is_string() {
+        Some("Building…".to_string())
+    } else if installing {
+        Some("Installing TeX Live…".to_string())
     } else {
-        b["state"].as_str().unwrap_or("new")
+        b["busy"].as_str().map(str::to_string)
     };
-    let label = if building {
-        "building…".to_string()
-    } else {
-        b["label"].as_str().unwrap_or("not built yet").to_string()
+    let layouts = get(cx, "layouts");
+    let layout = layouts
+        .get(file)
+        .and_then(Value::as_str)
+        .unwrap_or("split")
+        .to_string();
+    let d = view::Doc {
+        file,
+        main: &main,
+        layout: &layout,
+        narrow,
+        busy,
+        state: b["state"].as_str().unwrap_or("new"),
+        errors: b["errors"].as_u64().unwrap_or(0),
+        warnings: b["warnings"].as_u64().unwrap_or(0),
+        pages: b["pages"].as_u64(),
+        ms: b["ms"].as_u64(),
+        engine: b["engine"].as_str(),
+        from: b["from"].as_str(),
+        has_pdf: pdf,
+        has_log: b["ran"].as_bool() == Some(true),
+        no_engine: b["missing"].is_string(),
+        notice: b.get("notice").filter(|n| n.is_object()),
+        key: doc::key(&main),
+        stem: doc::stem(&main),
+        pdf: doc::pdf(&main),
+        beside: doc::beside(&main),
     };
-    let pdf = has_pdf(cx, &main);
-    let mut bar = vec![
-        json!({"type": "badge", "text": match state {
-            "ok" => "built", "errors" => "errors", "failed" => "failed", "building" => "building", _ => "LaTeX",
-        }, "tone": tone(state)}),
-        json!({"type": "text", "text": if main == file { label.clone() } else { format!("{label} · part of {main}") },
-               "tone": "neutral", "size": "small"}),
-        json!({"type": "button", "label": "Build", "action": "build", "payload": {"main": main},
-               "icon": "play", "disabled": busy}),
-    ];
-    if let Some(p) = b["offer"].as_str() {
-        bar.push(json!({"type": "button", "label": format!("Install {p}"), "action": "install-package",
-                        "payload": {"main": main, "package": p}, "icon": "download", "tone": "accent"}));
-    }
-    if pdf {
-        bar.push(json!({"type": "button", "label": "Save PDF beside source", "action": "save-to-workspace",
-                        "payload": {"from": doc::pdf(&main), "to": doc::beside(&main)}, "icon": "download"}));
-    }
-    let header = json!({"type": "row", "children": bar});
-    let result = if b["missing"].is_string() {
-        json!({"type": "empty", "title": "No TeX Live on this host",
-               "text": "Chimaera looked on the PATH your terminals get, including your environment prelude. On a cluster, load yours in Environment settings (often `module load texlive`) and build again. Or install TinyTeX, a current TeX Live trimmed to the common packages, into this plugin's own folder: nothing else on the system changes.",
-               "action": {"label": "Install TeX Live (TinyTeX, about 150 MB)", "action": "install-tool", "payload": {"tool": "tinytex"}}})
-    } else if pdf {
-        json!({"type": "stack", "children": [{"type": "pdf", "src": doc::pdf(&main)}, {"type": "diagnostics"}]})
-    } else if busy {
-        json!({"type": "stack", "children": [{"type": "progress", "label": label}, {"type": "diagnostics"}]})
-    } else {
-        json!({"type": "stack", "children": [
-            {"type": "empty", "title": "No PDF yet", "text": label,
-             "action": {"label": "Build", "action": "build", "payload": {"main": main}}},
-            {"type": "diagnostics"},
-        ]})
-    };
-    let body = if narrow {
-        json!({"type": "tabs", "tabs": [
-            {"title": "PDF", "children": [result]},
-            {"title": "Source", "children": [{"type": "editor", "path": file}]},
-        ]})
-    } else {
-        json!({"type": "split", "ratio": 0.5, "children": [{"type": "editor", "path": file}, result]})
-    };
-    ui::tree(json!({"type": "stack", "gap": "small", "children": [header, body]}))
+    view::tree(&d)
 }
 
 fn agent_main(cx: &Context, args: &Value) -> Result<String, String> {
@@ -847,6 +867,23 @@ impl Plugin for Latex {
         action: &str,
         payload: Value,
     ) -> Result<Option<Value>, String> {
+        if action == "layout" {
+            let file = payload["file"].as_str().ok_or("which file?")?;
+            let mode = match payload["value"].as_str() {
+                Some(m @ ("split" | "source" | "pdf")) => m,
+                _ => return Err("a layout is split, source or pdf".into()),
+            };
+            let mut layouts = get(&cx, "layouts");
+            layouts.insert(file.to_string(), json!(mode));
+            while layouts.len() > 64 {
+                let first = layouts.keys().next().cloned();
+                if let Some(k) = first {
+                    layouts.remove(&k);
+                }
+            }
+            put(&cx, "layouts", Value::Object(layouts));
+            return Ok(Some(document(&cx, file, false)));
+        }
         let main = payload["main"].as_str().ok_or("which document?")?;
         match action {
             "build" => match build(&cx, main, "user") {

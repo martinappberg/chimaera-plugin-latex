@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # The chimaera:plugin WIT world (API 0.2) and its Rust bindings, from the
 # daemon's repository, pinned to a commit so a release is reproducible.
-chimaera-plugin-api = { git = "https://github.com/martinappberg/chimaera.git", rev = "4c003ec1d211df1dcf9fc23ae4af28c5d6b84ab0" }
+chimaera-plugin-api = { git = "https://github.com/martinappberg/chimaera.git", rev = "1efe086f9131b82acef936d0f713aeed2fa92bf5" }
 
 [profile.release]
 lto = true

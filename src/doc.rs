@@ -215,6 +215,29 @@ pub fn tlmgr_words(stderr: &str) -> String {
     line.chars().take(200).collect()
 }
 
+/// What a missing file is, in words: `tikz-cd.sty` → "the tikz-cd package".
+pub fn missing_words(file: &str) -> String {
+    match file.rsplit_once('.') {
+        Some((stem, "sty")) => format!("the {stem} package"),
+        Some((stem, "cls")) => format!("the {stem} class"),
+        _ => file.to_string(),
+    }
+}
+
+/// The line (from 1) of `source` that asks for `file`: the `\usepackage`,
+/// `\RequirePackage` or `\documentclass` naming it (TeX points past it).
+pub fn missing_line(source: &str, file: &str) -> Option<u32> {
+    let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
+    source.lines().enumerate().find_map(|(i, line)| {
+        let code = line.split('%').next().unwrap_or("");
+        let asks = code.contains("\\usepackage")
+            || code.contains("\\RequirePackage")
+            || code.contains("\\documentclass");
+        let names = code.split(['{', '}', ',']).any(|part| part.trim() == stem);
+        (asks && names).then_some(i as u32 + 1)
+    })
+}
+
 pub fn not_found(err: &str) -> bool {
     err.contains("was not found") || err.contains("is not installed")
 }
@@ -282,6 +305,17 @@ mod tests {
             tlmgr_words("/x/tlmgr: package foo not present in repository.\n"),
             "package foo not present in repository."
         );
+    }
+
+    #[test]
+    fn a_missing_package_is_found_where_it_is_asked_for() {
+        let src = "\\documentclass{article}\n% \\usepackage{tikz-cd}\n\\usepackage{amsmath, tikz-cd}\n\\title{x}\n";
+        assert_eq!(missing_line(src, "tikz-cd.sty"), Some(3));
+        assert_eq!(missing_line(src, "article.cls"), Some(1));
+        assert_eq!(missing_line(src, "nothere.sty"), None);
+        assert_eq!(missing_words("tikz-cd.sty"), "the tikz-cd package");
+        assert_eq!(missing_words("elsarticle.cls"), "the elsarticle class");
+        assert_eq!(missing_words("fig.png"), "fig.png");
     }
 
     #[test]
