@@ -1,0 +1,149 @@
+id = "latex"
+name = "LaTeX"
+version = "0.1.0"
+summary = "Build .tex to PDF beside the source with latexmk, errors as editor marks, compile_latex for agents, and TeX Live on one click."
+description = "Opens .tex files as source beside their PDF. Saving builds with latexmk (every pass, bibliography included), and so does an agent's edit while the document is open; errors and warnings become marks in the editor and a problems list with Ask agent; agents check their own work with compile_latex. Uses the TeX Live your terminals have (a `module load texlive` in Environment settings counts); where there is none, installs TinyTeX, a current TeX Live, into its own folder on one click, and adds a package it lacks when a build needs one. Builds run as jobs under Chimaera's limits with the project's latexmkrc never run, and write only to the plugin's output folder; Save PDF beside source copies one on your click."
+homepage = "https://github.com/martinappberg/chimaera-plugin-latex"
+api = "0.2"
+
+[access]
+files = "read"
+
+[provides]
+mcp_tools = ["compile_latex", "latex_guide"]
+events = ["file-saved", "file-changed", "job-finished", "settings-changed"]
+
+[adds]
+ui = [".tex opens as source beside its PDF · builds on save · errors as editor marks · TeX Live on one click"]
+agents = ["compile_latex builds a document and returns its errors · latex_guide: how to write LaTeX here"]
+
+[[views]]
+id = "document"
+title = "LaTeX"
+slot = "file"
+
+[[files]]
+match = ["*.tex", "*.ltx"]
+view = "document"
+label = "LaTeX"
+debounce_ms = 800
+
+# latexmk starts the engines and the bibliography tools itself; each is
+# declared so the card names every program that runs.
+[[programs]]
+name = "latexmk"
+version = ["-v"]
+
+[[programs]]
+name = "pdflatex"
+
+[[programs]]
+name = "xelatex"
+
+[[programs]]
+name = "lualatex"
+
+[[programs]]
+name = "bibtex"
+
+[[programs]]
+name = "biber"
+
+[[programs]]
+name = "tlmgr"
+network = "TeX Live package mirrors (TinyTeX's own, tlnet.yihui.org, or CTAN), only for the plugin's TinyTeX"
+
+[[tools]]
+id = "tinytex"
+name = "TeX Live (TinyTeX)"
+version = "2026.09"
+programs = ["latexmk", "pdflatex", "xelatex", "lualatex", "bibtex", "biber", "tlmgr"]
+home = "https://github.com/rstudio/tinytex-releases"
+
+[[tools.artifacts]]
+platform = "linux-x86_64"
+url = "https://github.com/rstudio/tinytex-releases/releases/download/v2026.09/TinyTeX-linux-x86_64-v2026.09.tar.xz"
+sha256 = "9551e932ed74ea77a36b4bd3fb6d852f540c044037b083f77a8b15d4b97ca3fc"
+size = 151702028
+unpack = "tar.xz"
+bin = ".TinyTeX/bin/x86_64-linux"
+
+[[tools.artifacts]]
+platform = "linux-aarch64"
+url = "https://github.com/rstudio/tinytex-releases/releases/download/v2026.09/TinyTeX-linux-arm64-v2026.09.tar.xz"
+sha256 = "6fc321d7c57f133e62f07a711dbd52c79fda2d152a231afc421ab762b02e217b"
+size = 157777676
+unpack = "tar.xz"
+bin = ".TinyTeX/bin/aarch64-linux"
+
+[[tools.artifacts]]
+platform = "macos-x86_64"
+url = "https://github.com/rstudio/tinytex-releases/releases/download/v2026.09/TinyTeX-v2026.09.tgz"
+sha256 = "72b9d40dafbf54513dda059c9db9398d84295f8c9293b8ec4233395964b61663"
+size = 267235208
+unpack = "tar.gz"
+bin = "TinyTeX/bin/universal-darwin"
+
+[[tools.artifacts]]
+platform = "macos-aarch64"
+url = "https://github.com/rstudio/tinytex-releases/releases/download/v2026.09/TinyTeX-v2026.09.tgz"
+sha256 = "72b9d40dafbf54513dda059c9db9398d84295f8c9293b8ec4233395964b61663"
+size = 267235208
+unpack = "tar.gz"
+bin = "TinyTeX/bin/universal-darwin"
+
+[[settings]]
+key = "engine"
+type = "enum"
+options = ["pdflatex", "xelatex", "lualatex"]
+default = "pdflatex"
+label = "Engine"
+description = "Used when a document's head doesn't say (`% !TEX program = xelatex`)."
+
+[[settings]]
+key = "build_on_save"
+type = "bool"
+default = true
+label = "Build on save"
+description = "Build the document each time you save one of its files."
+
+[[settings]]
+key = "build_on_open"
+type = "bool"
+default = true
+label = "Build on open"
+description = "Build a document that has no build yet when you open it."
+
+[[settings]]
+key = "build_on_agent_edit"
+type = "bool"
+default = true
+label = "Build when an agent edits"
+description = "Build an open document when an agent (or anything else) changes one of its files."
+
+[[settings]]
+key = "use_plugin_tinytex"
+type = "bool"
+default = false
+label = "Use the plugin's TeX Live"
+description = "Build with the TinyTeX this plugin installed even when this host has its own TeX Live (for a cluster whose TeX Live is old or short of packages)."
+
+[[settings]]
+key = "install_missing_packages"
+type = "bool"
+default = true
+label = "Install missing packages"
+description = "When a build with the plugin's TinyTeX needs a package it lacks, look it up and install it with tlmgr, then build again. Needs the network."
+
+[[settings]]
+key = "timeout_s"
+type = "number"
+default = 180
+min = 10
+max = 600
+label = "Time limit (seconds)"
+description = "A build that runs longer is stopped."
+scope = "host"
+
+[release]
+github = "martinappberg/chimaera-plugin-latex"

@@ -1,0 +1,11 @@
+[0] Config.pm:329> INFO - This is Biber 2.22
+[0] Config.pm:332> INFO - Logfile is 'o-bib/bib.blg'
+[57] biber:342> INFO - === Tue Sep 29, 2026, 06:38:01
+[70] Biber.pm:421> INFO - Reading 'o-bib/bib.bcf'
+[124] Biber.pm:1002> INFO - Found 2 citekeys in bib section 0
+[134] Biber.pm:4487> INFO - Processing section 0
+[142] Biber.pm:4680> INFO - Looking for bibtex file 'refs.bib' for section 0
+[142] bibtex.pm:1713> INFO - LaTeX decoding ...
+[145] bibtex.pm:1519> INFO - Found BibTeX data source 'refs.bib'
+[166] Utils.pm:480> ERROR - BibTeX subsystem: /tmp/biber_tmp/8fe4c9854184545302f21ebf0d47516c_12585.utf8, line 3, syntax error: at end of input, expected end of entry ("}" or ")") (skipping to next "@")
+[167] Biber.pm:137> INFO - ERRORS: 1

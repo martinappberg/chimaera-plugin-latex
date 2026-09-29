@@ -1,0 +1,22 @@
+[package]
+name = "chimaera-plugin-latex"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/martinappberg/chimaera-plugin-latex"
+description = "LaTeX for Chimaera: build .tex to PDF beside the source with latexmk, errors as editor marks, compile_latex for agents, and TeX Live (TinyTeX) on one click."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The chimaera:plugin WIT world (API 0.2) and its Rust bindings, from the
+# daemon's repository, pinned to a commit so a release is reproducible.
+chimaera-plugin-api = { git = "https://github.com/martinappberg/chimaera.git", rev = "4c003ec1d211df1dcf9fc23ae4af28c5d6b84ab0" }
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
+opt-level = "s"
