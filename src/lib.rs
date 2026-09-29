@@ -139,6 +139,10 @@ fn build(cx: &Context, main: &str, by: &str) -> Result<String, String> {
         save_builds(cx, all);
         return Ok(job);
     }
+    // latexmk reruns nothing when no source changed since a run that failed
+    // ("Nothing to do"), yet after a missing package is installed, a click
+    // on Build or an agent's compile the same sources must go through again.
+    let force = doc::rerun_forced(entry["state"].as_str());
     let engine = doc::engine(
         &head(cx, main),
         platform::setting(cx, "engine")
@@ -174,6 +178,11 @@ fn build(cx: &Context, main: &str, by: &str) -> Result<String, String> {
         "priority": by,
         "wall_s": wall(cx),
     });
+    if force {
+        if let Some(args) = spec["args"].as_array_mut() {
+            args.insert(1, json!("-g"));
+        }
+    }
     if !dir.is_empty() {
         spec["cwd"] = json!(dir);
     }
@@ -699,6 +708,7 @@ fn document(cx: &Context, file: &str, narrow: bool) -> Value {
         has_pdf: pdf,
         has_log: b["ran"].as_bool() == Some(true),
         no_engine: b["missing"].is_string(),
+        download: tinytex["download"]["size"].as_u64(),
         notice: b.get("notice").filter(|n| n.is_object()),
         key: doc::key(&main),
         stem: doc::stem(&main),
