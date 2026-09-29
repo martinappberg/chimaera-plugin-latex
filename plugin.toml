@@ -1,6 +1,6 @@
 id = "latex"
 name = "LaTeX"
-version = "0.1.0"
+version = "0.1.1"
 summary = "Build .tex to PDF beside the source with latexmk, errors as editor marks, compile_latex for agents, and TeX Live on one click."
 description = "Opens .tex files as source beside their PDF. Saving builds with latexmk (every pass, bibliography included), and so does an agent's edit while the document is open; errors and warnings become marks in the editor and a problems list with Ask agent; agents check their own work with compile_latex. Uses the TeX Live your terminals have (a `module load texlive` in Environment settings counts); where there is none, installs TinyTeX, a current TeX Live, into its own folder on one click, and adds a package it lacks when a build needs one. Builds run as jobs under Chimaera's limits with the project's latexmkrc never run, and write only to the plugin's output folder; Save PDF beside source copies one on your click."
 homepage = "https://github.com/martinappberg/chimaera-plugin-latex"
